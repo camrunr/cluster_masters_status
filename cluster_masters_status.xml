@@ -1,4 +1,4 @@
-<dashboard theme="dark">
+<dashboard>
   <label>Cluster Master Status</label>
   <row>
     <panel>
