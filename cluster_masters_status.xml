@@ -1,0 +1,44 @@
+<dashboard theme="dark">
+  <label>Cluster Master Status</label>
+  <row>
+    <panel>
+      <table>
+        <search>
+          <query>| rest splunk_server_group=dmc_group_cluster_master /services/cluster/master/status
+| fields splunk_server maintenance_mode rolling_restart_flag service_ready_flag
+| join splunk_server [ rest splunk_server_group=dmc_group_cluster_master /services/cluster/master/health 
+       | fields splunk_server no_fixup_tasks_in_progress replication_factor_met search_factor_met splunk_version_peer_count all_peers_are_up all_data_is_searchable ]
+| sort splunk_server
+| eval "Cluster Master"=case(match(splunk_server,"cm1"),splunk_server." (Cluster 1)",
+                          match(splunk_server,"cm2"),splunk_server." (Cluster 2)",
+                          match(splunk_server,"cm3"),splunk_server." (Cluster 3)",
+                          true(),splunk_server)
+| eval "Maintenance Mode Disabled"=if(maintenance_mode=0,"✅","❌"),
+       "No Active Restart"=if(rolling_restart_flag=0,"✅","❌"),
+       "Service Ready"=if(service_ready_flag=1,"✅","❌"),
+       "All Data Searchable"=if(all_data_is_searchable=1,"✅","❌"),
+       "All Peers Up"=if(all_peers_are_up=1,"✅","❌"),
+       "No Fixup Tasks Running"=if(no_fixup_tasks_in_progress=1,"✅","❌"),
+       "RF Met"=if(replication_factor_met=1,"✅","❌"),
+       "SF Met"=if(search_factor_met=1,"✅","❌")
+| rex field=splunk_version_peer_count "(?&lt;Version&gt;[0-9.]+):\s+(?&lt;pc&gt;\d+)"
+| rename pc as "Peer Count"
+| fields Cluster* "All Data Searchable" Service* "No Active Restart" Maint* "No Fixup Tasks Running" *Met "All Peers Up" Version "Peer Count"</query>
+          <earliest>0</earliest>
+          <latest>now</latest>
+          <sampleRatio>1</sampleRatio>
+          <refresh>30s</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="count">100</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">none</option>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+</dashboard>
