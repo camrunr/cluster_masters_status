@@ -7,12 +7,16 @@
           <query>| rest splunk_server_group=dmc_group_cluster_master /services/cluster/master/status
 | fields splunk_server maintenance_mode rolling_restart_flag service_ready_flag
 | join splunk_server [ rest splunk_server_group=dmc_group_cluster_master /services/cluster/master/health 
-       | fields splunk_server no_fixup_tasks_in_progress replication_factor_met search_factor_met splunk_version_peer_count all_peers_are_up all_data_is_searchable ]
+    | fields splunk_server no_fixup_tasks_in_progress replication_factor_met search_factor_met splunk_version_peer_count all_peers_are_up all_data_is_searchable ]
+| join splunk_server [ rest splunk_server_group=dmc_group_cluster_master /services/server/info 
+    | fields splunk_server startup_time 
+    | eval DaysUp=floor((now()-startup_time)/86400)
+    | fields splunk_server DaysUp ]
 | sort splunk_server
-| eval "Cluster Master"=case(match(splunk_server,"cm1"),splunk_server." (Cluster 1)",
-                          match(splunk_server,"cm2"),splunk_server." (Cluster 2)",
-                          match(splunk_server,"cm3"),splunk_server." (Cluster 3)",
-                          true(),splunk_server)
+| eval env=case(match(splunk_server,"CM1"),"Cluster1",
+                match(splunk_server,"CM2"),"Cluster2",
+                true(),splunk_server)
+| rename splunk_server as "ClusterMaster"
 | eval "Maintenance Mode Disabled"=if(maintenance_mode=0,"✅","❌"),
        "No Active Restart"=if(rolling_restart_flag=0,"✅","❌"),
        "Service Ready"=if(service_ready_flag=1,"✅","❌"),
@@ -23,21 +27,65 @@
        "SF Met"=if(search_factor_met=1,"✅","❌")
 | rex field=splunk_version_peer_count "(?&lt;Version&gt;[0-9.]+):\s+(?&lt;pc&gt;\d+)"
 | rename pc as "Peer Count"
-| fields Cluster* "All Data Searchable" Service* "No Active Restart" Maint* "No Fixup Tasks Running" *Met "All Peers Up" Version "Peer Count"</query>
+| fields ClusterMaster env "All Data Searchable" Service* "No Active Restart" Maint* "No Fixup Tasks Running" *Met "All Peers Up" Version "Peer Count" DaysUp</query>
           <earliest>0</earliest>
           <latest>now</latest>
           <sampleRatio>1</sampleRatio>
-          <refresh>30s</refresh>
+          <refresh>10s</refresh>
           <refreshType>delay</refreshType>
         </search>
         <option name="count">100</option>
         <option name="dataOverlayMode">none</option>
-        <option name="drilldown">none</option>
+        <drilldown>
+          <set token="drilldown_cm">$row.ClusterMaster$</set>
+        </drilldown>
         <option name="percentagesRow">false</option>
         <option name="refresh.display">progressbar</option>
         <option name="rowNumbers">false</option>
         <option name="totalsRow">false</option>
         <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Peer Health</title>
+      <table depends="$drilldown_cm$">
+        <search>
+          <query>| rest splunk_server=$drilldown_cm$ /services/cluster/master/peers
+ | fields label status primary_count bucket_count is_searchable 
+ | rename label as splunk_server
+ | join splunk_server [ 
+   | rest splunk_server_group=dmc_group_indexer /services/server/introspection/queues
+      | fields splunk_server title current_size_bytes max_size_bytes 
+      | eval qp=100*round(current_size_bytes/max_size_bytes,2),
+             queue=replace(title,"\..*","")
+      | where match(queue,"agg|index|parsingQ|typing")
+      | chart max(qp) as Queue_perc over splunk_server by queue ]</query>
+          <earliest>-60m@m</earliest>
+          <latest>now</latest>
+          <refresh>1m</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+        <option name="count">30</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <format type="color" field="parsingQueue">
+          <colorPalette type="list">[#53A051,#F8BE34,#F1813F,#DC4E41]</colorPalette>
+          <scale type="threshold">5,70,99</scale>
+        </format>
+        <format type="color" field="typingQueue">
+          <colorPalette type="list">[#53A051,#F8BE34,#F1813F,#DC4E41]</colorPalette>
+          <scale type="threshold">5,70,99</scale>
+        </format>
+        <format type="color" field="indexQueue">
+          <colorPalette type="list">[#53A051,#F8BE34,#F1813F,#DC4E41]</colorPalette>
+          <scale type="threshold">5,70,99</scale>
+        </format>
+        <format type="color" field="aggQueue">
+          <colorPalette type="list">[#53A051,#F8BE34,#F1813F,#DC4E41]</colorPalette>
+          <scale type="threshold">5,70,99</scale>
+        </format>
       </table>
     </panel>
   </row>
